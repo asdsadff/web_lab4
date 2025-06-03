@@ -1,0 +1,9 @@
+syntax = "proto3";
+option java_package = "com.partsey.ssl";
+
+message Coin {
+  string stream = 1;
+  string symbol = 2;
+  double price_usdt = 3;
+  int64 time = 4;
+}

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>Інтерфейс OpenID Connect</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #e6f2f0; /* Початковий світлий фон */
+            color: #333; /* Початковий темний текст */
+            padding: 3rem;
+            max-width: 700px;
+            margin: auto;
+            border-radius: 10px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c7873; /* Початковий колір заголовка */
+        }
+
+        button {
+            background-color: #2c7873; /* Початковий колір кнопок */
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            margin: 0.5rem;
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: background-color 0.3s ease;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background-color: #1e5e58; /* Початковий ховер кнопок */
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            color: #666; /* Додав колір для тексту вимкненої кнопки */
+        }
+
+        .error {
+            color: red; /* Початковий колір помилок */
+        }
+
+        pre {
+            background: #f0f0f0;
+            padding: 0.75rem;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+
+        #status {
+            margin-top: 2rem;
+            padding: 1rem;
+            background-color: #ffffff; /* Початковий білий фон статусу */
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            text-align: center; /* Центрування тексту статусу */
+        }
+
+        #binanceStreamOutput {
+            margin-top: 2rem;
+            /* background-color: #f9f9f9;  Це був фон для всього блоку, тепер не потрібен */
+            /* border: 1px solid #ddd;   Теж не потрібен */
+            border-radius: 5px;
+            padding: 1rem; /* Залишаємо відступ всередині контейнера */
+            display: flex;
+            flex-direction: column;
+            gap: 10px; /* Відстань між елементами валют */
+        }
+
+        /* Стилі для кожного окремого рядка валюти (ці "смужки") */
+        .currency-data {
+            background-color: #f0f0f0; /* Світло-сірий фон для кожної смужки, як на скріншоті */
+            border: 1px solid #ddd; /* Тонкий бордер */
+            border-radius: 4px; /* Закруглені кути */
+            padding: 0.8rem 1.2rem; /* Внутрішні відступи */
+            display: flex; /* Використовуємо flexbox для вирівнювання вмісту */
+            justify-content: space-between; /* Рознести вміст по краях */
+            align-items: baseline; /* Вирівнювання по базовій лінії тексту */
+            font-size: 1.1em;
+            color: #333; /* Темний текст */
+        }
+
+        .currency-symbol {
+            font-weight: bold;
+            color: #2c7873; /* Колір, що відповідає вашому основному стилю */
+            margin-right: 1rem;
+            font-size: 1.2em; /* Трохи більший розмір для символу */
+        }
+
+        .currency-price {
+            font-family: 'Consolas', 'Monaco', 'Lucida Console', monospace; /* Моноширинний шрифт для ціни */
+            color: #008080; /* Зеленувато-синій для ціни, схожий на скріншоті, але в рамках вашої палітри */
+            flex-grow: 1; /* Дозволяє ціні займати доступний простір */
+            text-align: right; /* Вирівнювання ціни по правому краю */
+        }
+
+        .currency-time {
+            font-size: 0.85em; /* Менший розмір для часу */
+            color: #666; /* Сірий для часу */
+            margin-left: 1rem;
+        }
+    </style>
+</head>
+<body>
+<h1>Інтерфейс OpenID Connect</h1>
+
+
+<div style="text-align: center;">
+    <button onclick="login()">Увійти</button>
+    <button onclick="fetchUserInfo()">Отримати інформацію про користувача</button>
+    <button onclick="logout()">Вийти</button>
+    <button id="binanceStreamButton" onclick="connectToBinanceStream()">Отримати Binance Stream</button>
+</div>
+
+<div id="status">
+    <p>Натисніть «Отримати інформацію про користувача», щоб перевірити статус автентифікації.</p>
+</div>
+
+<div id="binanceStreamOutput">
+    <div id="btcusdt-data" class="currency-data">
+        <span class="currency-symbol">BTCUSDT:</span>
+        <span class="currency-price">Очікування даних...</span>
+        <span class="currency-time"></span>
+    </div>
+    <div id="ethusdt-data" class="currency-data">
+        <span class="currency-symbol">ETHUSDT:</span>
+        <span class="currency-price">Очікування даних...</span>
+        <span class="currency-time"></span>
+    </div>
+    <div id="adausdt-data" class="currency-data">
+        <span class="currency-symbol">ADAUSDT:</span>
+        <span class="currency-price">Очікування даних...</span>
+        <span class="currency-time"></span>
+    </div>
+    <div id="solusdt-data" class="currency-data">
+        <span class="currency-symbol">SOLUSDT:</span>
+        <span class="currency-price">Очікування даних...</span>
+        <span class="currency-time"></span>
+    </div>
+</div>
+
+
+<script type="module">
+    import {decodeCoin} from "./coin.js";
+    let binanceWebSocket = null;
+    const symbols = ["btcusdt", "ethusdt", "adausdt", "solusdt"]; // Ваш список символів
+
+    function getCookie(name) {
+        const value = `; ${document.cookie}`;
+        const parts = value.split(`; ${name}=`);
+        if (parts.length === 2) return parts.pop().split(';').shift();
+        return null;
+    }
+
+    function fetchUserInfo() {
+        fetch('https://localhost:8081/user/info', {
+            credentials: 'include',
+        })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Користувач не автентифікований');
+                }
+                return response.json();
+            })
+            .then(data => {
+                document.getElementById('status').innerHTML = `
+                        <p>Ви увійшли як <strong>${data.username}</strong></p>
+                        <pre>ID користувача: ${data.userId}</pre>
+                    `;
+                document.getElementById('binanceStreamButton').disabled = false;
+            })
+            .catch(error => {
+                document.getElementById('status').innerHTML = `
+                        <p>Ви не увійшли</p>
+                        <p class="error">Помилка: ${error.message}</p>
+                    `;
+                document.getElementById('binanceStreamButton').disabled = true;
+                if (binanceWebSocket) {
+                    binanceWebSocket.close();
+                    binanceWebSocket = null;
+                }
+                symbols.forEach(symbol => {
+                    const priceEl = document.querySelector(`#${symbol}-data .currency-price`);
+                    const timeEl = document.querySelector(`#${symbol}-data .currency-time`);
+                    if (priceEl) priceEl.textContent = 'Очікування даних...';
+                    if (timeEl) timeEl.textContent = '';
+                });
+            });
+    }
+
+    function login() {
+        window.location.href = 'https://localhost:8081/auth/login';
+    }
+
+
+    function logout() {
+        document.cookie = 'access_token=; path=/; max-age=0';
+        document.getElementById('status').innerHTML = '<p>Ви вийшли. Натисніть «Отримати інформацію про користувача», щоб перевірити ще раз.</p>';
+        document.getElementById('binanceStreamButton').disabled = true;
+        if (binanceWebSocket) {
+            binanceWebSocket.close();
+            binanceWebSocket = null;
+        }
+        symbols.forEach(symbol => {
+            const priceEl = document.querySelector(`#${symbol}-data .currency-price`);
+            const timeEl = document.querySelector(`#${symbol}-data .currency-time`);
+            if (priceEl) priceEl.textContent = 'Очікування даних...';
+            if (timeEl) timeEl.textContent = '';
+        });
+    }
+
+    function connectToBinanceStream() {
+        if (binanceWebSocket && binanceWebSocket.readyState === WebSocket.OPEN) {
+            console.log("WebSocket вже відкрито.");
+            return;
+        }
+
+
+
+        const wsUrl = `wss://localhost:8081/ws/binance`;
+
+        binanceWebSocket = new WebSocket(wsUrl);
+        binanceWebSocket.binaryType = 'arraybuffer';
+
+        binanceWebSocket.onopen = (event) => {
+            console.log('[WebSocket] Підключено до вашого WebSocket-сервера.', event);
+            symbols.forEach(symbol => {
+                const priceEl = document.querySelector(`#${symbol}-data .currency-price`);
+                const timeEl = document.querySelector(`#${symbol}-data .currency-time`);
+                if (priceEl) priceEl.textContent = 'Очікування даних...';
+                if (timeEl) timeEl.textContent = '';
+            });
+        };
+
+        binanceWebSocket.onmessage = (event) => {
+            let ticker = null;
+            try {
+                const buffer = new Uint8Array(event.data);
+                console.log("Received buffer:", buffer);
+                ticker = decodeCoin(buffer);
+                console.log("Successfully decoded ticker:", ticker);
+
+                if (ticker && ticker.symbol && typeof ticker.price_usdt === 'number') {
+                    const symbol = ticker.symbol.toLowerCase();
+                    const price = ticker.price_usdt;
+                    let tradeTime = null;
+                    if (ticker.time && typeof ticker.time === 'object' && ticker.time.hasOwnProperty('low') && ticker.time.hasOwnProperty('high')) {
+                        const low = ticker.time.low;
+                        const high = ticker.time.high;
+                        const timestamp = (high * Math.pow(2, 32)) + (ticker.time.unsigned ? low : (low >>> 0));
+                        if (!isNaN(timestamp)) {
+                            tradeTime = new Date(timestamp);
+                        } else {
+                            console.error("Failed to convert tradeTime to a valid number:", ticker.time);
+                            tradeTime = null;
+                        }
+                    } else if (ticker.time) {
+                        tradeTime = new Date(Number(ticker.time));
+                    }
+
+                    const priceEl = document.querySelector(`#${symbol}-data .currency-price`);
+                    const timeEl = document.querySelector(`#${symbol}-data .currency-time`);
+
+                    if (priceEl) priceEl.textContent = price.toFixed(2);
+                    if (timeEl) timeEl.textContent = tradeTime ? tradeTime.toLocaleTimeString() : "Невідомо";
+                } else {
+                    console.warn("Decoded ticker object is incomplete or invalid:", ticker);
+                }
+            } catch (err) {
+                console.error('Помилка десеріалізації Protobuf або обробки:', err);
+            }
+        };
+        binanceWebSocket.onerror = (event) => {
+            console.error('[WebSocket] Помилка:', event);
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML += `<p class="error">Помилка WebSocket: ${event.message || 'Невідома помилка'}</p>`;
+        };
+
+        binanceWebSocket.onclose = (event) => {
+            console.log('[WebSocket] З\'єднання закрито:', event.code, event.reason);
+            let reason = 'З\'єднання закрито.';
+            if (event.code === 1000) {
+                reason += ' (Нормальне закриття)';
+            } else if (event.code === 1006) {
+                reason += ' (Ненормальне закриття, наприклад, сервер не відповідає)';
+            } else if (event.code === 1008 && event.reason === "Unauthorized") {
+                reason = 'З\'єднання відхилено: Неавторизований (можливо, токен недійсний).';
+            }
+            const statusDiv = document.getElementById('status');
+            statusDiv.innerHTML += `<p style="color: orange;">${reason}</p>`;
+            binanceWebSocket = null;
+            symbols.forEach(symbol => {
+                const priceEl = document.querySelector(`#${symbol}-data .currency-price`);
+                const timeEl = document.querySelector(`#${symbol}-data .currency-time`);
+                if (priceEl) priceEl.textContent = 'З\'єднання закрито...';
+                if (timeEl) timeEl.textContent = '';
+            });
+        };
+    }
+
+    document.addEventListener('DOMContentLoaded', fetchUserInfo);
+
+
+    window.login = login;
+    window.logout = logout;
+    window.fetchUserInfo = fetchUserInfo;
+    window.connectToBinanceStream = connectToBinanceStream;
+</script>
+</body>
+</html>
